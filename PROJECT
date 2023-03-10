@@ -1,0 +1,35 @@
+domain: hcs.io
+layout:
+- go.kubebuilder.io/v3
+multigroup: true
+projectName: weiyuanke-etcd-operator
+repo: github.com/weiyuanke/etcd-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: hcs.io
+  group: etcd
+  kind: EtcdCluster
+  path: github.com/weiyuanke/etcd-operator/apis/etcd/v1beta2
+  version: v1beta2
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: hcs.io
+  group: etcd
+  kind: EtcdBackup
+  path: github.com/weiyuanke/etcd-operator/apis/etcd/v1beta2
+  version: v1beta2
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: hcs.io
+  group: etcd
+  kind: EtcdRestore
+  path: github.com/weiyuanke/etcd-operator/apis/etcd/v1beta2
+  version: v1beta2
+version: "3"

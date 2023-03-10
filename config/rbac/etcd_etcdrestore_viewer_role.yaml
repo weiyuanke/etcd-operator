@@ -1,0 +1,27 @@
+# permissions for end users to view etcdrestores.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: etcdrestore-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: weiyuanke-etcd-operator
+    app.kubernetes.io/part-of: weiyuanke-etcd-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: etcdrestore-viewer-role
+rules:
+- apiGroups:
+  - etcd.hcs.io
+  resources:
+  - etcdrestores
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - etcd.hcs.io
+  resources:
+  - etcdrestores/status
+  verbs:
+  - get
