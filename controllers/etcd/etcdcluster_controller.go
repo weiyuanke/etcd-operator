@@ -19,12 +19,22 @@ package etcd
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	etcdv1beta2 "github.com/weiyuanke/etcd-operator/apis/etcd/v1beta2"
+)
+
+var (
+	llog = ctrl.Log.WithName("EtcdClusterReconciler")
+)
+
+const (
+	finalizerName = "github.com/weiyuanke/etcd-operator/finalizer"
 )
 
 // EtcdClusterReconciler reconciles a EtcdCluster object
@@ -49,7 +59,37 @@ type EtcdClusterReconciler struct {
 func (r *EtcdClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
 
-	// TODO(user): your logic here
+	var etcdCluster etcdv1beta2.EtcdCluster
+	if err := r.Get(ctx, req.NamespacedName, &etcdCluster); err != nil {
+		if errors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	// delete etcdCluster
+	if !etcdCluster.ObjectMeta.DeletionTimestamp.IsZero() {
+		if controllerutil.ContainsFinalizer(&etcdCluster, finalizerName) {
+			controllerutil.RemoveFinalizer(&etcdCluster, finalizerName)
+			if err := r.Update(ctx, &etcdCluster); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
+	etcdCluster.SetDefaults()
+	if err := etcdCluster.Spec.Validate(); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// add finalizer
+	if !controllerutil.ContainsFinalizer(&etcdCluster, finalizerName) {
+		controllerutil.AddFinalizer(&etcdCluster, finalizerName)
+		if err := r.Update(ctx, &etcdCluster); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	return ctrl.Result{}, nil
 }
