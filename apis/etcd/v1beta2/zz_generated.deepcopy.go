@@ -386,7 +386,6 @@ func (in *PodPolicy) DeepCopyInto(out *PodPolicy) {
 		*out = new(v1.Affinity)
 		(*in).DeepCopyInto(*out)
 	}
-	in.Resources.DeepCopyInto(&out.Resources)
 	if in.Tolerations != nil {
 		in, out := &in.Tolerations, &out.Tolerations
 		*out = make([]v1.Toleration, len(*in))
@@ -400,11 +399,6 @@ func (in *PodPolicy) DeepCopyInto(out *PodPolicy) {
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
-	}
-	if in.PersistentVolumeClaimSpec != nil {
-		in, out := &in.PersistentVolumeClaimSpec, &out.PersistentVolumeClaimSpec
-		*out = new(v1.PersistentVolumeClaimSpec)
-		(*in).DeepCopyInto(*out)
 	}
 	if in.Annotations != nil {
 		in, out := &in.Annotations, &out.Annotations

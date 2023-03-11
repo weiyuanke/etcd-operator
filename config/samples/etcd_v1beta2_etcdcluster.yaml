@@ -9,4 +9,5 @@ metadata:
     app.kubernetes.io/created-by: weiyuanke-etcd-operator
   name: etcdcluster-sample
 spec:
-  # TODO(user): Add fields here
+  size: 3
+  version: "3.2.13"

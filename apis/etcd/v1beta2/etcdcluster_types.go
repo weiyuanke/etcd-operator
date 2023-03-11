@@ -90,7 +90,7 @@ type PodPolicy struct {
 
 	// Resources is the resource requirements for the etcd container.
 	// This field cannot be updated once the cluster is created.
-	Resources v1.ResourceRequirements `json:"resources,omitempty"`
+	// Resources v1.ResourceRequirements `json:"resources,omitempty"`
 
 	// Tolerations specifies the pod's tolerations.
 	Tolerations []v1.Toleration `json:"tolerations,omitempty"`
@@ -102,11 +102,11 @@ type PodPolicy struct {
 	// This field cannot be updated.
 	EtcdEnv []v1.EnvVar `json:"etcdEnv,omitempty"`
 
-	// PersistentVolumeClaimSpec is the spec to describe PVC for the etcd container
-	// This field is optional. If no PVC spec, etcd container will use emptyDir as volume
-	// Note. This feature is in alpha stage. It is currently only used as non-stable storage,
-	// not the stable storage. Future work need to make it used as stable storage.
-	PersistentVolumeClaimSpec *v1.PersistentVolumeClaimSpec `json:"persistentVolumeClaimSpec,omitempty"`
+	// // PersistentVolumeClaimSpec is the spec to describe PVC for the etcd container
+	// // This field is optional. If no PVC spec, etcd container will use emptyDir as volume
+	// // Note. This feature is in alpha stage. It is currently only used as non-stable storage,
+	// // not the stable storage. Future work need to make it used as stable storage.
+	// PersistentVolumeClaimSpec *v1.PersistentVolumeClaimSpec `json:"persistentVolumeClaimSpec,omitempty"`
 
 	// Annotations specifies the annotations to attach to pods the operator creates for the
 	// etcd cluster.
