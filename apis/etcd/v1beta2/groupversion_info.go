@@ -33,21 +33,4 @@ var (
 
 	// AddToScheme adds the types in this group-version to the given scheme.
 	AddToScheme = SchemeBuilder.AddToScheme
-
-	SchemeGroupVersion = schema.GroupVersion{Group: groupName, Version: "v1beta2"}
-	EtcdClusterCRDName = EtcdClusterResourcePlural + "." + groupName
-	EtcdBackupCRDName  = EtcdBackupResourcePlural + "." + groupName
-	EtcdRestoreCRDName = EtcdRestoreResourcePlural + "." + groupName
-)
-
-const (
-	EtcdClusterResourceKind   = "EtcdCluster"
-	EtcdClusterResourcePlural = "etcdclusters"
-	groupName                 = "etcd.database.coreos.com"
-
-	EtcdBackupResourceKind   = "EtcdBackup"
-	EtcdBackupResourcePlural = "etcdbackups"
-
-	EtcdRestoreResourceKind   = "EtcdRestore"
-	EtcdRestoreResourcePlural = "etcdrestores"
 )
