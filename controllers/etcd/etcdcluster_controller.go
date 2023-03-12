@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 
 	// "github.com/cert-manager/cert-manager/pkg/apis/certmanager"
 	// cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -28,14 +27,18 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	etcdv1beta2 "github.com/weiyuanke/etcd-operator/apis/etcd/v1beta2"
+	// "github.com/weiyuanke/etcd-operator/utils/etcd"
 )
 
 var (
@@ -236,89 +239,200 @@ func (r *EtcdClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // }
 
 func (r *EtcdClusterReconciler) syncEtcdPod(ctx context.Context, c *etcdv1beta2.EtcdCluster) error {
-	var initCluster string
-	for index := 1; index <= c.Spec.Size; index++ {
-		initCluster = initCluster + fmt.Sprintf("%s=http://%s:2380,", Name(namePrefix, c.Name, strconv.Itoa(index)), Name(namePrefix, c.Name, strconv.Itoa(index)))
+	// seed instance
+	var seedPod v1.Pod
+	seedName := resourceName(c.Name, strconv.Itoa(1))
+	key := types.NamespacedName{
+		Namespace: c.Namespace, Name: seedName,
 	}
-	initCluster = strings.Trim(initCluster, ",")
+	if err := r.Get(ctx, key, &seedPod); err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
 
-	for index := 1; index <= c.Spec.Size; index++ {
-		pod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: c.Namespace,
-				Name:      Name(namePrefix, c.Name, strconv.Itoa(index)),
-				OwnerReferences: []metav1.OwnerReference{
-					c.AsOwner(),
-				},
-				Labels: map[string]string{
-					podLabelKey: Name(namePrefix, c.Name, strconv.Itoa(index)),
-				},
+		seed := generatePodYaml(c, 1)
+		seed.Spec.Containers[0].Env = append(seed.Spec.Containers[0].Env,
+			v1.EnvVar{
+				Name:  "ETCD_INITIAL_CLUSTER_STATE",
+				Value: "new",
 			},
-			Spec: v1.PodSpec{
-				Containers: []v1.Container{
-					{
-						Image:           "k8s.gcr.io/etcd:3.5.1-0",
-						ImagePullPolicy: v1.PullIfNotPresent,
-						Name:            "etcd",
-						Command: []string{
-							"etcd",
-							"--data-dir=/var/lib/etcd",
-							"--listen-client-urls=http://0.0.0.0:2379",
-							"--listen-peer-urls=http://0.0.0.0:2380",
-						},
-						Env: []v1.EnvVar{
-							{
-								Name:  "ETCD_NAME",
-								Value: Name(namePrefix, c.Name, strconv.Itoa(index)),
-							},
-							{
-								Name:  "ETCD_ADVERTISE_CLIENT_URLS",
-								Value: fmt.Sprintf("http://%s:2379", Name(namePrefix, c.Name, strconv.Itoa(index))),
-							},
-							{
-								Name:  "ETCD_INITIAL_ADVERTISE_PEER_URLS",
-								Value: fmt.Sprintf("http://%s:2380", Name(namePrefix, c.Name, strconv.Itoa(index))),
-							},
-							{
-								Name:  "ETCD_INITIAL_CLUSTER",
-								Value: initCluster,
-							},
-							{
-								Name:  "ETCD_INITIAL_CLUSTER_STATE",
-								Value: "new",
-							},
-							{
-								Name:  "ETCD_INITIAL_CLUSTER_TOKEN",
-								Value: c.Name,
-							},
-						},
-					},
-				},
+			v1.EnvVar{
+				Name:  "ETCD_INITIAL_CLUSTER",
+				Value: fmt.Sprintf("%s=http://%s:2380,", seedName, seedName),
 			},
-		}
-		if err := r.Create(ctx, pod); err != nil {
-			if !errors.IsAlreadyExists(err) {
-				return err
-			}
+		)
+		if err := r.Create(ctx, seed); err != nil {
+			return err
 		}
 	}
+
+	isSeedReady := false
+	for _, v := range seedPod.Status.Conditions {
+		if v.Type == v1.PodReady && v.Status == v1.ConditionTrue {
+			isSeedReady = true
+		}
+	}
+	if !isSeedReady {
+		return fmt.Errorf("waiting for seed instance %s to be ready", resourceName(c.Name, strconv.Itoa(1)))
+	}
+
+	var podList v1.PodList
+	if err := r.List(ctx, &podList, &client.ListOptions{
+		LabelSelector: labels.Set(resourceLabels(c.Name)).AsSelector(), Namespace: c.Namespace,
+	}); err != nil {
+		return err
+	}
+
+	currentSet := sets.NewString()
+	for _, v := range podList.Items {
+		currentSet.Insert(v.Name)
+	}
+
+	desiredSet := sets.NewString()
+	for index := 1; index <= c.Spec.Size; index++ {
+		desiredSet.Insert(resourceName(c.Name, strconv.Itoa(index)))
+	}
+
+	// etcdClient, err := etcd.NewClient([]string{resourceName(c.Name, strconv.Itoa(1))}, "", "", "")
+	// if err != nil {
+	// 	return err
+	// }
+	// if err := etcdClient.Sync(); err != nil {
+	// 	return err
+	// }
+
+	// fmt.Println("=======")
+	// fmt.Println(etcdClient.ListMembers())
+
+	// fmt.Println(etcdClient.Endpoints)
+
+	// remove
+	for v := range currentSet.Difference(desiredSet) {
+		fmt.Println("to remove: " + v)
+	}
+
+	// add
+	for v := range desiredSet.Difference(currentSet) {
+		fmt.Println("to add: " + v)
+	}
+
+	// var initCluster string
+	// for index := 1; index <= c.Spec.Size; index++ {
+	// 	initCluster = initCluster + fmt.Sprintf("%s=http://%s:2380,", Name(namePrefix, c.Name, strconv.Itoa(index)), Name(namePrefix, c.Name, strconv.Itoa(index)))
+	// }
+	// initCluster = strings.Trim(initCluster, ",")
+
+	// for index := 1; index <= c.Spec.Size; index++ {
+	// 	pod := &v1.Pod{
+	// 		ObjectMeta: metav1.ObjectMeta{
+	// 			Namespace: c.Namespace,
+	// 			Name:      Name(namePrefix, c.Name, strconv.Itoa(index)),
+	// 			OwnerReferences: []metav1.OwnerReference{
+	// 				c.AsOwner(),
+	// 			},
+	// 			Labels: map[string]string{
+	// 				podLabelKey: Name(namePrefix, c.Name, strconv.Itoa(index)),
+	// 			},
+	// 		},
+	// 		Spec: v1.PodSpec{
+	// 			Containers: []v1.Container{
+	// 				{
+	// 					Image:           "k8s.gcr.io/etcd:3.5.1-0",
+	// 					ImagePullPolicy: v1.PullIfNotPresent,
+	// 					Name:            "etcd",
+	// 					Command: []string{
+	// 						"etcd",
+	// 						"--data-dir=/var/lib/etcd",
+	// 						"--listen-client-urls=http://0.0.0.0:2379",
+	// 						"--listen-peer-urls=http://0.0.0.0:2380",
+	// 					},
+	// 					Env: []v1.EnvVar{
+	// 						{
+	// 							Name:  "ETCD_NAME",
+	// 							Value: Name(namePrefix, c.Name, strconv.Itoa(index)),
+	// 						},
+	// 						{
+	// 							Name:  "ETCD_ADVERTISE_CLIENT_URLS",
+	// 							Value: fmt.Sprintf("http://%s:2379", Name(namePrefix, c.Name, strconv.Itoa(index))),
+	// 						},
+	// 						{
+	// 							Name:  "ETCD_INITIAL_ADVERTISE_PEER_URLS",
+	// 							Value: fmt.Sprintf("http://%s:2380", Name(namePrefix, c.Name, strconv.Itoa(index))),
+	// 						},
+	// 						{
+	// 							Name:  "ETCD_INITIAL_CLUSTER",
+	// 							Value: initCluster,
+	// 						},
+	// 						{
+	// 							Name:  "ETCD_INITIAL_CLUSTER_STATE",
+	// 							Value: "new",
+	// 						},
+	// 						{
+	// 							Name:  "ETCD_INITIAL_CLUSTER_TOKEN",
+	// 							Value: c.Name,
+	// 						},
+	// 					},
+	// 				},
+	// 			},
+	// 		},
+	// 	}
+	// 	if err := r.Create(ctx, pod); err != nil {
+	// 		if !errors.IsAlreadyExists(err) {
+	// 			return err
+	// 		}
+	// 	}
+	// }
 
 	return nil
 }
 
 func (r *EtcdClusterReconciler) syncEtcdService(ctx context.Context, c *etcdv1beta2.EtcdCluster) error {
+	var svcList v1.ServiceList
+	if err := r.List(ctx, &svcList, &client.ListOptions{
+		LabelSelector: labels.Set(resourceLabels(c.Name)).AsSelector(), Namespace: c.Namespace,
+	}); err != nil {
+		return err
+	}
+
+	currentSet := sets.NewString()
+	for _, v := range svcList.Items {
+		currentSet.Insert(v.Name)
+	}
+
+	desiredSet := sets.NewString()
 	for index := 1; index <= c.Spec.Size; index++ {
+		desiredSet.Insert(resourceName(c.Name, strconv.Itoa(index)))
+	}
+
+	// remove from currentSet
+	for v := range currentSet.Difference(desiredSet) {
 		svc := &v1.Service{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: c.Namespace,
-				Name:      Name(namePrefix, c.Name, strconv.Itoa(index)),
+				Name:      v,
+			},
+		}
+		if err := r.Delete(ctx, svc); err != nil {
+			if !errors.IsNotFound(err) {
+				return err
+			}
+		}
+	}
+
+	// add svc
+	for v := range desiredSet.Difference(currentSet) {
+		svc := &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: c.Namespace,
+				Name:      v,
 				OwnerReferences: []metav1.OwnerReference{
 					c.AsOwner(),
 				},
+				Labels: resourceLabels(c.Name),
 			},
 			Spec: v1.ServiceSpec{
 				Selector: map[string]string{
-					podLabelKey: Name(namePrefix, c.Name, strconv.Itoa(index)),
+					podLabelKey: v,
 				},
 				Type:      v1.ServiceTypeClusterIP,
 				ClusterIP: v1.ClusterIPNone,
@@ -348,8 +462,61 @@ func (r *EtcdClusterReconciler) syncEtcdService(ctx context.Context, c *etcdv1be
 	return nil
 }
 
-func Name(prefix string, clusterName string, suffix string) string {
-	return fmt.Sprintf("%s-%s-%s", prefix, clusterName, suffix)
+func generatePodYaml(c *etcdv1beta2.EtcdCluster, index int) *v1.Pod {
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: c.Namespace,
+			Name:      resourceName(c.Name, strconv.Itoa(index)),
+			OwnerReferences: []metav1.OwnerReference{
+				c.AsOwner(),
+			},
+			Labels: resourceLabels(c.Name),
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Image:           "k8s.gcr.io/etcd:3.5.1-0",
+					ImagePullPolicy: v1.PullIfNotPresent,
+					Name:            "etcd",
+					Command: []string{
+						"etcd",
+						"--data-dir=/var/lib/etcd",
+						"--listen-client-urls=http://0.0.0.0:2379",
+						"--listen-peer-urls=http://0.0.0.0:2380",
+					},
+					Env: []v1.EnvVar{
+						{
+							Name:  "ETCD_NAME",
+							Value: resourceName(c.Name, strconv.Itoa(index)),
+						},
+						{
+							Name:  "ETCD_ADVERTISE_CLIENT_URLS",
+							Value: fmt.Sprintf("http://%s:2379", resourceName(c.Name, strconv.Itoa(index))),
+						},
+						{
+							Name:  "ETCD_INITIAL_ADVERTISE_PEER_URLS",
+							Value: fmt.Sprintf("http://%s:2380", resourceName(c.Name, strconv.Itoa(index))),
+						},
+						{
+							Name:  "ETCD_INITIAL_CLUSTER_TOKEN",
+							Value: c.Name,
+						},
+					},
+				},
+			},
+		},
+	}
+	return pod
+}
+
+func resourceLabels(clusterName string) map[string]string {
+	return map[string]string{
+		podLabelKey: fmt.Sprintf("%s-%s", namePrefix, clusterName),
+	}
+}
+
+func resourceName(clusterName string, suffix string) string {
+	return fmt.Sprintf("%s-%s-%s", namePrefix, clusterName, suffix)
 }
 
 // SetupWithManager sets up the controller with the Manager.
